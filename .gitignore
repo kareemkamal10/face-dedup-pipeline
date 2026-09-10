@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+fdp_output/
+*.faiss
+*.jsonl
+raw_data/
+.env
