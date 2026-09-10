@@ -1,6 +1,6 @@
 insightface==0.7.3
 onnxruntime-gpu==1.18.1
-faiss-gpu==1.7.2
+faiss-cpu>=1.7.4
 huggingface_hub>=0.24.0
 opencv-python-headless>=4.9.0
 numpy<2.0
