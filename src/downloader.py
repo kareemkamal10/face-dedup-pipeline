@@ -4,6 +4,7 @@
 """
 import os
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
@@ -14,6 +15,20 @@ logger = logging.getLogger("fdp.downloader")
 
 _session = requests.Session()
 _session.headers.update({"User-Agent": "Mozilla/5.0 (face-dedup-pipeline)"})
+
+# لازم حجم الـ pool يطابق (أو يكبر عن) عدد الـ threads المتزامنة،
+# وإلا requests بيقفل الاتصالات الزيادة ويعيد فتحها من جديد كل مرة (بطيء جدًا).
+_retry_strategy = requests.adapters.Retry(
+    total=0,  # إعادة المحاولة بنتحكم فيها إحنا يدويًا في _download_one_image
+    backoff_factor=0.5,
+)
+_adapter = requests.adapters.HTTPAdapter(
+    pool_connections=config.DOWNLOAD_MAX_WORKERS * 2,
+    pool_maxsize=config.DOWNLOAD_MAX_WORKERS * 2,
+    max_retries=_retry_strategy,
+)
+_session.mount("http://", _adapter)
+_session.mount("https://", _adapter)
 
 
 def _download_one_image(url: str, dest_path: str) -> bool:
@@ -33,6 +48,8 @@ def _download_one_image(url: str, dest_path: str) -> bool:
             logger.debug("فشل تحميل %s (محاولة %d/%d): %s", url, attempt, config.DOWNLOAD_MAX_RETRIES, exc)
             if os.path.exists(dest_path):
                 os.remove(dest_path)
+            if attempt < config.DOWNLOAD_MAX_RETRIES:
+                time.sleep(0.5 * attempt)  # backoff بسيط قبل إعادة المحاولة
     return False
 
 

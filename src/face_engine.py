@@ -1,11 +1,16 @@
 """
 كشف الوجه واستخراج embedding باستخدام InsightFace (buffalo_l / ArcFace).
 بياخد أكبر وجه وأقرب للكاميرا في الصورة (أكبر مساحة bounding box).
+
+ملاحظة مهمة: الموديل بيتأكد إنه شغال فعليًا على GPU (CUDAExecutionProvider)
+ولو مش متاح بيطلع تحذير واضح بدل ما يرجع لـ CPU بصمت وتحس إن الأداء بطيء
+من غير ما تعرف ليه.
 """
 import logging
 
 import cv2
 import numpy as np
+import onnxruntime as ort
 from insightface.app import FaceAnalysis
 
 import config
@@ -15,16 +20,47 @@ logger = logging.getLogger("fdp.face_engine")
 _app: FaceAnalysis | None = None
 
 
+def _check_gpu_available() -> bool:
+    available = ort.get_available_providers()
+    logger.info("onnxruntime available providers: %s", available)
+
+    if "CUDAExecutionProvider" not in available:
+        logger.warning(
+            "⚠️  CUDAExecutionProvider مش موجود في onnxruntime! الموديل هيشتغل على CPU "
+            "وده هيبقى أبطأ بكتير. تأكد إن GPU مفعّل في إعدادات Kaggle Notebook، وإن "
+            "onnxruntime-gpu اتثبت صح (مش onnxruntime العادي)."
+        )
+        return False
+    return True
+
+
 def get_engine() -> FaceAnalysis:
     """Singleton: يحمّل الموديل مرة واحدة بس ويعيد استخدامه."""
     global _app
     if _app is None:
+        gpu_ok = _check_gpu_available()
         logger.info("تحميل موديل InsightFace (%s) ...", config.FACE_MODEL_NAME)
+
+        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+        ctx_id = 0 if gpu_ok else -1  # -1 = CPU في insightface
+
         _app = FaceAnalysis(
             name=config.FACE_MODEL_NAME,
-            providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
+            providers=providers,
         )
-        _app.prepare(ctx_id=0, det_size=config.FACE_DET_SIZE)
+        _app.prepare(ctx_id=ctx_id, det_size=config.FACE_DET_SIZE)
+
+        # تأكيد فعلي بعد التحميل: هل الموديل شغال على GPU ولا لأ
+        try:
+            det_session = _app.models["detection"].session
+            actual_providers = det_session.get_providers()
+            if "CUDAExecutionProvider" in actual_providers:
+                logger.info("✅ الموديل شغال فعليًا على GPU (CUDAExecutionProvider).")
+            else:
+                logger.warning("⚠️  الموديل شغال على CPU فعليًا (providers: %s).", actual_providers)
+        except Exception:  # noqa: BLE001
+            logger.debug("مقدرتش أتأكد من الـ providers الفعلية للموديل.")
+
         logger.info("تم تحميل الموديل بنجاح.")
     return _app
 
