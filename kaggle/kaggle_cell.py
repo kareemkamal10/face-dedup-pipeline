@@ -41,7 +41,23 @@ install_code = os.system("pip install -r /kaggle/working/repo/requirements.txt")
 if install_code != 0:
     raise RuntimeError("فشل تثبيت المتطلبات — راجع الرسائل فوق قبل ما تكمل.")
 
-# --- 2.5) فحص onnxruntime فعليًا بيشوف الـ GPU ولا لأ ---
+# --- 2.5) ضبط LD_LIBRARY_PATH عشان onnxruntime يلاقي مكتبات CUDA اللي اتثبتت عن طريق pip ---
+# (مش هنعتمد على نسخة CUDA اللي في نظام Kaggle نفسه، عشان نتجنب مشاكل التوافق)
+import glob
+import site
+
+nvidia_lib_dirs = []
+for sp in site.getsitepackages():
+    nvidia_lib_dirs += glob.glob(os.path.join(sp, "nvidia", "*", "lib"))
+
+if nvidia_lib_dirs:
+    existing_ld_path = os.environ.get("LD_LIBRARY_PATH", "")
+    os.environ["LD_LIBRARY_PATH"] = ":".join(nvidia_lib_dirs + [existing_ld_path])
+    print("LD_LIBRARY_PATH محدّث بـ:", nvidia_lib_dirs)
+else:
+    print("⚠️  مفيش مكتبات nvidia-*-cu12 اتلاقت في site-packages، هنعتمد على CUDA اللي في نظام Kaggle.")
+
+# --- 2.6) فحص onnxruntime فعليًا بيشوف الـ GPU ولا لأ ---
 print("=" * 60)
 print("فحص onnxruntime providers...")
 print("=" * 60)
