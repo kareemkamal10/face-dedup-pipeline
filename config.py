@@ -33,7 +33,7 @@ HF_UPLOAD_SUBDIR = "face_index_output"
 # ---------------------------------------------------------------------------
 OUTER_BATCH_SIZE = 20_000   # تقسيم بشري بس، بيتحفظ عنده checkpoint
 INNER_BATCH_SIZE = 250      # الدفعة الفعلية اللي بتتحمل/تتعالج مع بعض في الرام
-DOWNLOAD_MAX_WORKERS = 16   # عدد الـ threads المتوازية للتحميل
+DOWNLOAD_MAX_WORKERS = 100  # عدد التحميلات المتوازية في نفس اللحظة (على مستوى الصورة)
 DOWNLOAD_TIMEOUT = 15       # ثانية
 DOWNLOAD_MAX_RETRIES = 3
 
