@@ -73,4 +73,16 @@ with gr.Blocks(title="تشخيص كشف الوجه - buffalo_l") as demo:
 
 
 if __name__ == "__main__":
-    demo.launch(share=True)
+    import os
+
+    ngrok_token = os.environ.get("NGROK_AUTH_TOKEN", "")
+    if ngrok_token:
+        from pyngrok import ngrok
+        ngrok.set_auth_token(ngrok_token)
+        public_url = ngrok.connect(7860)
+        print("=" * 60)
+        print(f"الرابط العام: {public_url}")
+        print("=" * 60)
+        demo.launch(server_port=7860, share=False)
+    else:
+        demo.launch(share=True)
