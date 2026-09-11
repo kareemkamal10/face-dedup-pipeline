@@ -12,12 +12,17 @@ import cv2
 import numpy as np
 import onnxruntime as ort
 from insightface.app import FaceAnalysis
+from insightface.app.common import Face
 
 import config
 
 logger = logging.getLogger("fdp.face_engine")
 
 _app: FaceAnalysis | None = None
+
+# مقاسات احتياطية (fallback) لو الكشف بالمقاس الأساسي (config.FACE_DET_SIZE) فشل.
+# بتتفعل بس لما المحاولة الأولى تلاقي صفر وجوه - مش بتأثر على الحالة العادية.
+_FALLBACK_DET_SIZES = [160, 640]
 
 
 def _check_gpu_available() -> bool:
@@ -70,17 +75,47 @@ def _bbox_area(face) -> float:
     return max(0.0, x2 - x1) * max(0.0, y2 - y1)
 
 
+def _detect_with_size(app: FaceAnalysis, img: np.ndarray, size: int) -> list[Face]:
+    """يعمل كشف وجه + استخراج embedding بمقاس محدد، من غير إعادة تجهيز الموديل كله."""
+    bboxes, kpss = app.det_model.detect(img, input_size=(size, size), max_num=0, metric="default")
+    if bboxes is None or len(bboxes) == 0:
+        return []
+
+    faces = []
+    for i in range(bboxes.shape[0]):
+        bbox = bboxes[i, 0:4]
+        det_score = bboxes[i, 4]
+        kps = kpss[i] if kpss is not None else None
+        face = Face(bbox=bbox, kps=kps, det_score=det_score)
+        for taskname, model in app.models.items():
+            if taskname == "detection":
+                continue
+            model.get(img, face)
+        faces.append(face)
+    return faces
+
+
 def extract_largest_face_embedding(image_path: str) -> np.ndarray | None:
     """
     يقرأ صورة، يكشف كل الوجوه فيها، ويرجع embedding لأكبر وجه (الأقرب للكاميرا).
-    يرجع None لو مفيش صورة صالحة أو مفيش وجه.
+    يجرب المقاس الأساسي (config.FACE_DET_SIZE) الأول، ولو مالقاش حاجة، يجرب
+    مقاسات احتياطية قبل ما يستسلم - بدون أي تكلفة إضافية في الحالة العادية.
+    يرجع None لو مفيش صورة صالحة أو مفيش وجه في أي محاولة.
     """
     img = cv2.imread(image_path)
     if img is None:
         return None
 
     app = get_engine()
-    faces = app.get(img)
+
+    faces = app.get(img)  # بيستخدم config.FACE_DET_SIZE الأساسي
+    if not faces:
+        for fallback_size in _FALLBACK_DET_SIZES:
+            faces = _detect_with_size(app, img, fallback_size)
+            if faces:
+                logger.debug("اتكشف وش بمقاس احتياطي %d بعد فشل المقاس الأساسي.", fallback_size)
+                break
+
     if not faces:
         return None
 
