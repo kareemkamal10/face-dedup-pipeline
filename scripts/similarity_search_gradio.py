@@ -5,11 +5,11 @@ FAISS index الحقيقي، وتطلعلك أقرب الأشخاص بالاسم
 حقيقية مش تخمين.
 
 الاستخدام في خلية Kaggle منفصلة:
-    !pip install -q gradio pyngrok
+    !pip install -q gradio
     !python /kaggle/working/repo/scripts/similarity_search_gradio.py
 
 محتاج نفس environment variables بتاعة main.py: HF_TOKEN, HF_DATASET_REPO
-(واختياريًا NGROK_AUTH_TOKEN لو الـ share=True بتاع Gradio بيعلق).
+يمكن تفعيل رابط Gradio العام اختياريًا عبر FDP_GRADIO_SHARE=1.
 """
 import json
 import logging
@@ -129,14 +129,11 @@ with gr.Blocks(title="بحث التشابه الفعلي في الـ DB") as dem
 
 
 if __name__ == "__main__":
-    ngrok_token = os.environ.get("NGROK_AUTH_TOKEN", "")
-    if ngrok_token:
-        from pyngrok import ngrok
-        ngrok.set_auth_token(ngrok_token)
-        public_url = ngrok.connect(7860)
-        print("=" * 60)
-        print(f"الرابط العام: {public_url}")
-        print("=" * 60)
-        demo.launch(server_port=7860, share=False)
-    else:
-        demo.launch(share=True, share=True)
+    use_public_share = os.environ.get("FDP_GRADIO_SHARE", "0") == "1"
+    demo.launch(
+        server_name="0.0.0.0",
+        server_port=7860,
+        share=use_public_share,
+        inline=True,
+        show_error=True,
+    )
