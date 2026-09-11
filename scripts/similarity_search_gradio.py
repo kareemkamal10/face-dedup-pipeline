@@ -139,4 +139,4 @@ if __name__ == "__main__":
         print("=" * 60)
         demo.launch(server_port=7860, share=False)
     else:
-        demo.launch(share=True)
+        demo.launch(share=True, share=True)
