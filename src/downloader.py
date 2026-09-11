@@ -6,8 +6,10 @@
 import os
 import logging
 import time
+import threading
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from urllib.parse import urlparse
 
 import requests
 
@@ -28,25 +30,81 @@ _adapter = requests.adapters.HTTPAdapter(
 _session.mount("http://", _adapter)
 _session.mount("https://", _adapter)
 
+# --- تحديد أقصى عدد اتصالات متزامنة لكل host على حدة ---
+# لو سبناها 100 كلها على نفس الموقع، السيرفر ممكن يبدأ يرد بصفحات/صور
+# "blocked" بـ status code 200 عادي (يعني مش exception، والتحميل "بينجح"
+# شكليًا لكن المحتوى مش الصورة الحقيقية). الحل: نحدد سقف لكل host.
+_host_semaphores: dict[str, threading.Semaphore] = {}
+_host_semaphores_lock = threading.Lock()
+
+
+def _get_host_semaphore(url: str) -> threading.Semaphore:
+    host = urlparse(url).netloc
+    with _host_semaphores_lock:
+        if host not in _host_semaphores:
+            _host_semaphores[host] = threading.Semaphore(config.PER_HOST_MAX_CONCURRENT)
+        return _host_semaphores[host]
+
+
+# --- توقيعات (magic bytes) الصور الحقيقية المدعومة ---
+_IMAGE_SIGNATURES = (
+    (b"\xff\xd8\xff", "jpeg"),
+    (b"\x89PNG\r\n\x1a\n", "png"),
+    (b"GIF87a", "gif"),
+    (b"GIF89a", "gif"),
+    (b"RIFF", "webp"),  # لازم تأكيد إضافي إن بعد RIFF فيه WEBP (تحت)
+    (b"BM", "bmp"),
+)
+
+
+def _looks_like_real_image(data: bytes) -> bool:
+    """يتأكد إن أول بايتات الملف فعلاً توقيع صورة معروف، مش صفحة HTML أو رسالة خطأ."""
+    if not data:
+        return False
+    for signature, fmt in _IMAGE_SIGNATURES:
+        if data.startswith(signature):
+            if fmt == "webp":
+                return len(data) > 12 and data[8:12] == b"WEBP"
+            return True
+    return False
+
 
 def _download_one_image(url: str, dest_path: str) -> bool:
-    """يحاول تحميل صورة واحدة بعدد محاولات محدود. يرجع True لو نجح."""
+    """يحاول تحميل صورة واحدة بعدد محاولات محدود. يرجع True لو نجح ومكتمل فعلاً."""
+    semaphore = _get_host_semaphore(url)
     for attempt in range(1, config.DOWNLOAD_MAX_RETRIES + 1):
-        try:
-            resp = _session.get(url, timeout=config.DOWNLOAD_TIMEOUT, stream=True)
-            resp.raise_for_status()
-            with open(dest_path, "wb") as f:
+        with semaphore:
+            try:
+                resp = _session.get(url, timeout=config.DOWNLOAD_TIMEOUT, stream=True)
+                resp.raise_for_status()
+
+                expected_size = resp.headers.get("Content-Length")
+                expected_size = int(expected_size) if expected_size and expected_size.isdigit() else None
+
+                downloaded_bytes = bytearray()
                 for chunk_bytes in resp.iter_content(8192):
-                    f.write(chunk_bytes)
-            if os.path.getsize(dest_path) == 0:
-                raise ValueError("empty file")
-            return True
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("فشل تحميل %s (محاولة %d/%d): %s", url, attempt, config.DOWNLOAD_MAX_RETRIES, exc)
-            if os.path.exists(dest_path):
-                os.remove(dest_path)
-            if attempt < config.DOWNLOAD_MAX_RETRIES:
-                time.sleep(0.5 * attempt)
+                    downloaded_bytes.extend(chunk_bytes)
+
+                # تحقق 1: الحجم المُحمَّل يطابق الحجم المعلن من السيرفر (لو معلن)
+                if expected_size is not None and len(downloaded_bytes) != expected_size:
+                    raise ValueError(
+                        f"تحميل ناقص: اتحمل {len(downloaded_bytes)} بايت من أصل {expected_size}"
+                    )
+
+                # تحقق 2: المحتوى فعلاً صورة حقيقية مش صفحة خطأ/حظر
+                if not _looks_like_real_image(bytes(downloaded_bytes[:16])):
+                    raise ValueError("المحتوى مش صورة حقيقية (توقيع الملف غير معروف)")
+
+                with open(dest_path, "wb") as f:
+                    f.write(downloaded_bytes)
+
+                return True
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("فشل تحميل %s (محاولة %d/%d): %s", url, attempt, config.DOWNLOAD_MAX_RETRIES, exc)
+                if os.path.exists(dest_path):
+                    os.remove(dest_path)
+                if attempt < config.DOWNLOAD_MAX_RETRIES:
+                    time.sleep(0.5 * attempt)
     return False
 
 
