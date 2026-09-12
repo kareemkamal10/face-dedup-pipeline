@@ -17,8 +17,8 @@ os.environ["HF_TOKEN"] = HF_TOKEN
 os.environ["HF_DATASET_REPO"] = HF_DATASET_REPO
 os.environ["FDP_TEMP_ROOT"] = "/kaggle/temp/fdp_images"
 os.environ["FDP_WORK_ROOT"] = "/kaggle/working/fdp_output"
-# عرض الواجهة داخل مخرجات خلية Kaggle، بدون ngrok أو نفق Gradio خارجي.
-os.environ["FDP_GRADIO_SHARE"] = "0"
+# عرض الواجهة برابط عام (Gradio tunnel) - أثبت إنه سريع وشغال في اللوج اللي فات
+os.environ["FDP_GRADIO_SHARE"] = "1"
 
 # clone في مسار منفصل عشان مانلخبطش على الـ pipeline الأساسي
 os.system(f"rm -rf /kaggle/working/repo_search && git clone {GITHUB_REPO_URL} /kaggle/working/repo_search")
