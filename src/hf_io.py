@@ -85,6 +85,53 @@ def download_existing_outputs() -> bool:
     return found
 
 
+def download_verification_progress() -> bool:
+    """يحمّل أي تقدم سابق لعملية التحقق (لو الجلسة اتقفلت وعايزين نكمل)."""
+    from huggingface_hub import snapshot_download
+    import shutil
+
+    staging = os.path.join(config.WORK_ROOT, "_hf_staging_verify")
+    os.makedirs(staging, exist_ok=True)
+
+    try:
+        snapshot_download(
+            repo_id=config.HF_DATASET_REPO,
+            repo_type="dataset",
+            token=config.HF_TOKEN or None,
+            local_dir=staging,
+            allow_patterns=f"{config.VERIFY_HF_SUBDIR}/*",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.info("مفيش تقدم سابق لعملية التحقق (يمكن أول تشغيل): %s", exc)
+        return False
+
+    src_dir = os.path.join(staging, config.VERIFY_HF_SUBDIR)
+    if not os.path.isdir(src_dir):
+        return False
+
+    os.makedirs(config.VERIFY_WORK_DIR, exist_ok=True)
+    found = False
+    for fname in os.listdir(src_dir):
+        shutil.copy2(os.path.join(src_dir, fname), os.path.join(config.VERIFY_WORK_DIR, fname))
+        found = True
+
+    logger.info("تحميل تقدم سابق لعملية التحقق: %s", "نجح" if found else "مفيش حاجة")
+    return found
+
+
+def upload_verification_results():
+    """يرفع مجلد التحقق كامل (الملفات النهائية + ملفات المتابعة) في مجلد مخصص منفصل."""
+    api = HfApi(token=config.HF_TOKEN or None)
+    logger.info("جاري رفع نتايج التحقق من التكرار...")
+    api.upload_folder(
+        repo_id=config.HF_DATASET_REPO,
+        repo_type="dataset",
+        folder_path=config.VERIFY_WORK_DIR,
+        path_in_repo=config.VERIFY_HF_SUBDIR,
+    )
+    logger.info("تم رفع نتايج التحقق بنجاح في مجلد %s.", config.VERIFY_HF_SUBDIR)
+
+
 def upload_results():
     """
     يرفع مجلد الـ index والتقارير كاملين على نفس الـ HF dataset،

@@ -52,3 +52,23 @@ FAISS_INDEX_FILENAME = "performers_face_index.faiss"
 METADATA_FILENAME = "performers_metadata.jsonl"
 FAILED_IDS_FILENAME = "failed_ids.jsonl"
 PROCESSED_IDS_FILENAME = "processed_ids.txt"
+
+# ---------------------------------------------------------------------------
+# التحقق النهائي من التكرارات (تحميل صورة واحدة لكل شخص + بحث حي في الـ DB)
+# ---------------------------------------------------------------------------
+VERIFY_CONFIRMED_THRESHOLD = 0.75   # فوق كده = نفس الشخص أكيد
+VERIFY_SUSPECTED_THRESHOLD = 0.55   # من هنا لحد العتبة المؤكدة = يتفحص بالبيانات
+VERIFY_TOP_K = 5                    # عدد أقرب الجيران المعروضين لكل شخص
+
+VERIFY_WORK_DIR = os.path.join(WORK_ROOT, "duplicate_verification")
+VERIFY_HF_SUBDIR = "duplicate_check_output"
+
+VERIFY_CONFIRMED_EDGES_FILE = "confirmed_edges.jsonl"       # append-only أثناء الشغل
+VERIFY_REVIEW_PAIRS_FILE = "review_pairs.jsonl"             # append-only أثناء الشغل
+VERIFY_TOP5_LOG_FILE = "all_top5_results.jsonl"             # سجل تدقيق لكل فحص
+VERIFY_PROCESSED_FILE = "verification_processed_ids.txt"
+VERIFY_SINGLE_IMAGE_FAILED_FILE = "single_image_failed_ids.jsonl"
+
+VERIFY_OUTPUT_CONFIRMED = "confirmed_duplicates.json"
+VERIFY_OUTPUT_REVIEW = "uncertain_review.json"
+VERIFY_OUTPUT_REPORT = "report.txt"

@@ -163,6 +163,11 @@ def download_batch(performers: list[dict], max_workers: int | None = None) -> di
     return dict(results)
 
 
+def download_one_image_public(url: str, dest_path: str) -> bool:
+    """نسخة عامة (public) من _download_one_image - تستخدم لمعالجة عنصر واحد لوحده."""
+    return _download_one_image(url, dest_path)
+
+
 def cleanup_performer_dir(performer_id: str) -> None:
     """يمسح مجلد صور performer بعد ما نخلص منه (يوفر مساحة)."""
     performer_dir = os.path.join(config.TEMP_ROOT, performer_id)
