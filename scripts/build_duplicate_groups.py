@@ -19,6 +19,7 @@ import sys
 
 import faiss
 import numpy as np
+from tqdm import tqdm
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -96,9 +97,19 @@ def main():
             logger.warning("الملف المحفوظ فيه مشكلة، هنعيد البحث من جديد: %s", exc)
 
     if not cache_valid:
-        logger.info("استخراج المتجهات وعمل بحث دفعة واحدة لكل الـ %d عنصر (ده بياخد شوية دقايق أول مرة بس)...", n)
+        logger.info("استخراج المتجهات وعمل بحث على شرائح (هيوريك شريط تقدم بالوقت)...")
         all_vectors = faiss_index.reconstruct_n(0, n)
-        scores, neighbors = faiss_index.search(all_vectors, TOP_K + 1)
+
+        search_chunk_size = 2000
+        scores = np.empty((n, TOP_K + 1), dtype=np.float32)
+        neighbors = np.empty((n, TOP_K + 1), dtype=np.int64)
+
+        for start in tqdm(range(0, n, search_chunk_size), desc="بحث FAISS (شرائح)"):
+            end = min(start + search_chunk_size, n)
+            chunk_scores, chunk_neighbors = faiss_index.search(all_vectors[start:end], TOP_K + 1)
+            scores[start:end] = chunk_scores
+            neighbors[start:end] = chunk_neighbors
+
         np.savez(SEARCH_CACHE_PATH, scores=scores, neighbors=neighbors, n=n)
         logger.info("تم حفظ نتيجة البحث في %s - أي تشغيلة جاية بعتبات مختلفة هتبقى فورية.", SEARCH_CACHE_PATH)
 
@@ -112,7 +123,7 @@ def main():
 
     reject_count = 0
 
-    for i in range(n):
+    for i in tqdm(range(n), desc="تصنيف النتايج"):
         for score, j in zip(scores[i], neighbors[i]):
             if j < 0 or j == i:
                 continue
