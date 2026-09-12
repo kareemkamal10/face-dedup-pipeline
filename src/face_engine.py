@@ -8,6 +8,7 @@
 """
 import logging
 import threading
+import time
 
 import cv2
 import numpy as np
@@ -21,6 +22,12 @@ logger = logging.getLogger("fdp.face_engine")
 
 _app: FaceAnalysis | None = None
 _app_lock = threading.Lock()  # يمنع 100 thread من تحميل الموديل مرة واحدة كل واحد لوحده
+
+# حد أقصى منفصل لعدد استخدامات GPU الفعلية في نفس اللحظة. التحميل من
+# الإنترنت ممكن يفضل 100 متوازي براحته (شبكة مش GPU)، لكن كرت الشاشة نفسه
+# بيتخنق لو 100 thread حاولوا يعملوا "اتصال" بيه في نفس اللحظة بالظبط
+# (CUDNN_STATUS_INTERNAL_ERROR / CUBLAS_STATUS_ALLOC_FAILED).
+_gpu_semaphore = threading.Semaphore(8)
 
 # مقاسات احتياطية (fallback) لو الكشف بالمقاس الأساسي (config.FACE_DET_SIZE) فشل.
 # بتتفعل بس لما المحاولة الأولى تلاقي صفر وجوه - مش بتأثر على الحالة العادية.
@@ -122,13 +129,23 @@ def extract_largest_face_embedding(image_path: str) -> np.ndarray | None:
 
     app = get_engine()
 
-    faces = app.get(img)  # بيستخدم config.FACE_DET_SIZE الأساسي
-    if not faces:
-        for fallback_size in _FALLBACK_DET_SIZES:
-            faces = _detect_with_size(app, img, fallback_size)
-            if faces:
-                logger.debug("اتكشف وش بمقاس احتياطي %d بعد فشل المقاس الأساسي.", fallback_size)
-                break
+    for attempt in range(2):  # محاولة أساسية + إعادة محاولة واحدة لو حصل خطأ GPU عابر
+        try:
+            with _gpu_semaphore:
+                faces = app.get(img)  # بيستخدم config.FACE_DET_SIZE الأساسي
+                if not faces:
+                    for fallback_size in _FALLBACK_DET_SIZES:
+                        faces = _detect_with_size(app, img, fallback_size)
+                        if faces:
+                            logger.debug("اتكشف وش بمقاس احتياطي %d بعد فشل المقاس الأساسي.", fallback_size)
+                            break
+            break  # نجح، اخرج من حلقة إعادة المحاولة
+        except Exception as exc:  # noqa: BLE001
+            if attempt == 0:
+                logger.debug("خطأ GPU عابر، إعادة محاولة واحدة: %s", exc)
+                time.sleep(0.3)
+                continue
+            raise
 
     if not faces:
         return None
