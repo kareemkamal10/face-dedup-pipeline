@@ -21,6 +21,7 @@ os.environ["HF_TOKEN"] = HF_TOKEN
 os.environ["HF_DATASET_REPO"] = HF_DATASET_REPO
 os.environ["FDP_TEMP_ROOT"] = "/kaggle/temp/fdp_images"
 os.environ["FDP_WORK_ROOT"] = "/kaggle/working/fdp_output"
+os.environ["PYTHONUNBUFFERED"] = "1"  # يمنع بايثون من تأجيل طباعة الـ output
 
 gpu_check = subprocess.run(["nvidia-smi"], capture_output=True, text=True)
 if gpu_check.returncode != 0:
@@ -42,4 +43,4 @@ if nvidia_lib_dirs:
     os.environ["LD_LIBRARY_PATH"] = ":".join(nvidia_lib_dirs + [os.environ.get("LD_LIBRARY_PATH", "")])
 
 os.chdir("/kaggle/working/repo")
-os.system("python scripts/verify_duplicates_live.py")
+os.system("python -u scripts/verify_duplicates_live.py")

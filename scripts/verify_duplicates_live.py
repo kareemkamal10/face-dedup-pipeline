@@ -20,6 +20,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import faiss
 
+print("=" * 60, flush=True)
+print("بدء تشغيل سكريبت التحقق من التكرارات...", flush=True)
+print("=" * 60, flush=True)
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import config
