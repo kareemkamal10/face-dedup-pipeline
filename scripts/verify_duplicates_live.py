@@ -19,7 +19,6 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import faiss
-from tqdm import tqdm
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -118,29 +117,48 @@ def main():
     logger.info("عدد العناصر اللي هيتم فحصها فعليًا: %d", len(todo))
 
     store = VerificationStore()
-    already_done = sum(1 for p in todo if store.is_done(p["id"]))
-    logger.info("عدد العناصر اللي خلصت بالفعل من تشغيلة سابقة: %d", already_done)
 
     # 3) المعالجة الفعلية: 100 عملية متوازية (تحميل + كشف وجه + بحث لكل عنصر)
+    # ملحوظة: مش بنستخدم tqdm هنا لأنه لما يشتغل من غير تيرمنال حقيقي (زي
+    # os.system في خلية Kaggle) بيطبع سطر جديد كامل مع كل تحديث بدل ما
+    # يحدّث نفس السطر - يعني ممكن يطبع مئات الآلاف من الأسطر ويهنج المتصفح.
+    # بدالها: عداد بسيط بيطبع سطر واحد كل ما نوصل لنسبة معينة بس.
+    pending = [p for p in todo if not store.is_done(p["id"])]
+    total = len(pending)
+    logger.info("عدد العناصر اللي هيتم فحصها فعليًا (بعد استبعاد اللي خلص): %d", total)
+
     processed_since_upload = 0
+    completed = 0
+    log_interval = max(1, total // 200)  # حوالي 200 سطر تحديث بس، مهما كان حجم البيانات
+    start_time = time.time()
+
     with ThreadPoolExecutor(max_workers=config.DOWNLOAD_MAX_WORKERS) as executor:
         futures = {
             executor.submit(process_one, p, faiss_index, ids_in_order, performers_by_id, store): p["id"]
-            for p in todo if not store.is_done(p["id"])
+            for p in pending
         }
-        with tqdm(total=len(futures), desc="فحص التكرار") as pbar:
-            for future in as_completed(futures):
-                pid = futures[future]
-                try:
-                    future.result()
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("خطأ غير متوقع في معالجة %s: %s", pid, exc)
-                pbar.update(1)
-                processed_since_upload += 1
+        for future in as_completed(futures):
+            pid = futures[future]
+            try:
+                future.result()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("خطأ غير متوقع في معالجة %s: %s", pid, exc)
 
-                if processed_since_upload >= UPLOAD_EVERY_N_ITEMS:
-                    hf_io.upload_verification_results()
-                    processed_since_upload = 0
+            completed += 1
+            processed_since_upload += 1
+
+            if completed % log_interval == 0 or completed == total:
+                elapsed = time.time() - start_time
+                rate = completed / elapsed if elapsed > 0 else 0
+                remaining_min = ((total - completed) / rate / 60) if rate > 0 else 0
+                logger.info(
+                    "التقدم: %d/%d (%.1f%%) | %.1f عنصر/ثانية | الوقت المتبقي التقريبي: %.0f دقيقة",
+                    completed, total, 100 * completed / total, rate, remaining_min,
+                )
+
+            if processed_since_upload >= UPLOAD_EVERY_N_ITEMS:
+                hf_io.upload_verification_results()
+                processed_since_upload = 0
 
     logger.info("انتهت المعالجة الحية لكل العناصر.")
 
