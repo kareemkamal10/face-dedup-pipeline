@@ -41,6 +41,7 @@ TOP_K = 5  # عدد أقرب الجيران (من غير احتساب العنص
 
 OUTPUT_CONFIRMED = os.path.join(config.REPORTS_DIR, "confirmed_duplicates.json")
 OUTPUT_REVIEW = os.path.join(config.REPORTS_DIR, "uncertain_review.json")
+SEARCH_CACHE_PATH = os.path.join(config.INDEX_DIR, "neighbor_search_cache.npz")
 
 
 def _slim(performer: dict) -> dict:
@@ -80,11 +81,27 @@ def main():
 
     ids_in_order = [m["id"] for m in metadata_list]  # index position -> id
 
-    # 3) استخراج كل المتجهات دفعة واحدة، وعمل batch search لأقرب K+1 جار
-    #    (+1 عشان العنصر هيلاقي نفسه دايمًا كأقرب نتيجة بتشابه 100%)
-    logger.info("استخراج المتجهات وعمل بحث دفعة واحدة لكل الـ %d عنصر...", n)
-    all_vectors = faiss_index.reconstruct_n(0, n)
-    scores, neighbors = faiss_index.search(all_vectors, TOP_K + 1)
+    # 3) استخراج كل المتجهات، وعمل batch search لأقرب K+1 جار - أو استخدام
+    #    نتيجة محفوظة من قبل لو موجودة ومطابقة (يوفر 5-10 دقايق في كل تجربة
+    #    عتبة جديدة، بدل إعادة البحث الضخم من الصفر في كل مرة)
+    cache_valid = False
+    if os.path.exists(SEARCH_CACHE_PATH):
+        try:
+            cached = np.load(SEARCH_CACHE_PATH)
+            if cached["scores"].shape == (n, TOP_K + 1) and cached["n"] == n:
+                scores, neighbors = cached["scores"], cached["neighbors"]
+                cache_valid = True
+                logger.info("لقيت نتيجة بحث محفوظة من قبل ومطابقة - هنستخدمها بدل إعادة البحث (توفير وقت).")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("الملف المحفوظ فيه مشكلة، هنعيد البحث من جديد: %s", exc)
+
+    if not cache_valid:
+        logger.info("استخراج المتجهات وعمل بحث دفعة واحدة لكل الـ %d عنصر (ده بياخد شوية دقايق أول مرة بس)...", n)
+        all_vectors = faiss_index.reconstruct_n(0, n)
+        scores, neighbors = faiss_index.search(all_vectors, TOP_K + 1)
+        np.savez(SEARCH_CACHE_PATH, scores=scores, neighbors=neighbors, n=n)
+        logger.info("تم حفظ نتيجة البحث في %s - أي تشغيلة جاية بعتبات مختلفة هتبقى فورية.", SEARCH_CACHE_PATH)
+
     logger.info("انتهى البحث. جاري تصنيف النتايج...")
 
     uf = UnionFind(n)
