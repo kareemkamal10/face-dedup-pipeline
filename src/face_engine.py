@@ -7,6 +7,7 @@
 من غير ما تعرف ليه.
 """
 import logging
+import threading
 
 import cv2
 import numpy as np
@@ -19,6 +20,7 @@ import config
 logger = logging.getLogger("fdp.face_engine")
 
 _app: FaceAnalysis | None = None
+_app_lock = threading.Lock()  # يمنع 100 thread من تحميل الموديل مرة واحدة كل واحد لوحده
 
 # مقاسات احتياطية (fallback) لو الكشف بالمقاس الأساسي (config.FACE_DET_SIZE) فشل.
 # بتتفعل بس لما المحاولة الأولى تلاقي صفر وجوه - مش بتأثر على الحالة العادية.
@@ -40,24 +42,34 @@ def _check_gpu_available() -> bool:
 
 
 def get_engine() -> FaceAnalysis:
-    """Singleton: يحمّل الموديل مرة واحدة بس ويعيد استخدامه."""
+    """
+    Singleton: يحمّل الموديل مرة واحدة بس ويعيد استخدامه، حتى لو 100 thread
+    نادوا عليه في نفس اللحظة بالظبط (double-checked locking).
+    """
     global _app
-    if _app is None:
+    if _app is not None:
+        return _app
+
+    with _app_lock:
+        # تأكيد ثاني جوه القفل: يمكن thread تاني حمّل الموديل وإحنا مستنيين الدور
+        if _app is not None:
+            return _app
+
         gpu_ok = _check_gpu_available()
         logger.info("تحميل موديل InsightFace (%s) ...", config.FACE_MODEL_NAME)
 
         providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
         ctx_id = 0 if gpu_ok else -1  # -1 = CPU في insightface
 
-        _app = FaceAnalysis(
+        app = FaceAnalysis(
             name=config.FACE_MODEL_NAME,
             providers=providers,
         )
-        _app.prepare(ctx_id=ctx_id, det_size=config.FACE_DET_SIZE)
+        app.prepare(ctx_id=ctx_id, det_size=config.FACE_DET_SIZE)
 
         # تأكيد فعلي بعد التحميل: هل الموديل شغال على GPU ولا لأ
         try:
-            det_session = _app.models["detection"].session
+            det_session = app.models["detection"].session
             actual_providers = det_session.get_providers()
             if "CUDAExecutionProvider" in actual_providers:
                 logger.info("✅ الموديل شغال فعليًا على GPU (CUDAExecutionProvider).")
@@ -67,6 +79,8 @@ def get_engine() -> FaceAnalysis:
             logger.debug("مقدرتش أتأكد من الـ providers الفعلية للموديل.")
 
         logger.info("تم تحميل الموديل بنجاح.")
+        _app = app  # آخر خطوة، عشان أي thread تاني يشوفه جاهز تمامًا مش نص محمّل
+
     return _app
 
 
